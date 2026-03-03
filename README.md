@@ -4,18 +4,32 @@ AI model deployment and autoscaling on OpenShift using KEDA, KServe, and vLLM.
 
 ## Prerequisites
 
-- OpenShift cluster with user-workload monitoring enabled
-- KEDA operator installed
+- OpenShift AI cluster with GPU nodes
+- Cluster admin access
 
 ## Quick Start
 
-### 1. Create Project
+### 1. Install KEDA Operator
+
+```bash
+oc create namespace openshift-keda
+oc label namespace openshift-keda openshift.io/cluster-monitoring=true
+helm install keda helm/keda-operator/ -n openshift-keda
+```
+
+### 2. Enable User Workload Monitoring
+
+```bash
+helm install uwm helm/uwm/ -n openshift-monitoring
+```
+
+### 3. Create Project
 
 ```bash
 oc new-project autoscaling-demo
 ```
 
-### 2. Setup KEDA Authentication (Required for Autoscaling)
+### 4. Setup KEDA Authentication (Required for Autoscaling)
 
 ```bash
 # Create ServiceAccount for KEDA to access Thanos metrics
@@ -37,7 +51,7 @@ EOF
 oc adm policy add-cluster-role-to-user cluster-monitoring-view -z keda-prometheus-sa -n autoscaling-demo
 ```
 
-### 3. Deploy Model with Helm
+### 5. Deploy Model with Helm
 
 ```bash
 # Granite 3.3-8B with KEDA autoscaling
@@ -53,7 +67,7 @@ helm install llama3-2-3b helm/llama3.2-3b/ \
   -n autoscaling-demo
 ```
 
-### 4. Verify Autoscaling
+### 6. Verify Autoscaling
 
 ```bash
 # Check ScaledObject

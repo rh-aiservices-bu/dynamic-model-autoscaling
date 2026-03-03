@@ -2,9 +2,9 @@
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
-  name: llama3-2-3b
+  name: {{ include "granite-3-3-8b.fullname" . }}
   labels:
-    {{- include "llama3-2-3b.labels" . | nindent 4 }}
+    {{- include "granite-3-3-8b.labels" . | nindent 4 }}
     opendatahub.io/dashboard: "true"
   annotations:
     opendatahub.io/recommended-accelerators: '["nvidia.com/gpu"]'
@@ -43,8 +43,6 @@ spec:
       ports:
         - containerPort: 8080
           protocol: TCP
-      resources:
-        {{- toYaml .Values.resources | nindent 8 }}
       volumeMounts:
         - name: shm
           mountPath: /dev/shm
@@ -52,7 +50,7 @@ spec:
     - name: shm
       emptyDir:
         medium: Memory
-        sizeLimit: {{ .Values.servingRuntime.shmSizeLimit | default "1Gi" }}
+        sizeLimit: {{ .Values.servingRuntime.shmSizeLimit | default "2Gi" }}
   {{- with .Values.nodeSelector }}
   nodeSelector:
     {{- toYaml . | nindent 4 }}
@@ -65,9 +63,4 @@ spec:
   tolerations:
     {{- toYaml . | nindent 4 }}
   {{- end }}
-  builtInAdapter:
-    serverType: vllm
-    runtimeManagementPort: 8080
-    memBufferBytes: {{ .Values.servingRuntime.memBufferBytes | default 134217728 }}
-    modelLoadingTimeoutMillis: {{ .Values.servingRuntime.modelLoadingTimeoutMillis | default 90000 }}
 {{- end }}

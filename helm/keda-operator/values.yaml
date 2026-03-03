@@ -1,5 +1,6 @@
 # Namespace configuration
 namespace:
+  create: false  # Set to true to create the namespace via Helm (not recommended for openshift-* namespaces)
   name: openshift-keda
   enableClusterMonitoring: true
 
