@@ -1,0 +1,29 @@
+# KEDA HTTP Add-on Configuration
+# This chart documents the installation process - actual installation uses upstream chart
+
+namespace: openshift-keda
+
+# Interceptor configuration
+interceptor:
+  replicas: 2
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+# Operator configuration
+operator:
+  watchNamespace: ""  # Empty = cluster-global mode
+
+# Scaler configuration
+scaler:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi

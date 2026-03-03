@@ -10,7 +10,12 @@ metadata:
   annotations:
     openshift.io/display-name: {{ .Values.inferenceService.displayName | default "granite-3.3-8b" }}
     serving.knative.openshift.io/enablePassthrough: 'true'
-    {{- if .Values.keda.enabled }}
+    {{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+    # HTTP Add-on handles scaling - use external autoscaler (KEDA)
+    # See: https://developers.redhat.com/articles/2025/09/23/how-set-kserve-autoscaling-vllm-keda
+    serving.kserve.io/autoscalerClass: external
+    {{- else if .Values.keda.enabled }}
+    # Prometheus-based KEDA autoscaling (1→N only)
     serving.kserve.io/autoscalerClass: keda
     {{- end }}
     serving.kserve.io/deploymentMode: {{ .Values.inferenceService.deploymentMode | default "RawDeployment" }}
@@ -24,9 +29,16 @@ spec:
     automountServiceAccountToken: {{ .Values.inferenceService.automountServiceAccountToken | default false }}
     deploymentStrategy:
       type: RollingUpdate
+    {{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+    # HTTP Add-on handles scaling - allow scale-to-zero
+    maxReplicas: {{ .Values.httpAddon.maxReplicas | default (.Values.inferenceService.maxReplicas | default 3) }}
+    minReplicas: {{ .Values.httpAddon.minReplicas | default 0 }}
+    {{- else }}
     maxReplicas: {{ .Values.inferenceService.maxReplicas | default 1 }}
     minReplicas: {{ .Values.inferenceService.minReplicas | default 1 }}
-    {{- if .Values.keda.enabled }}
+    {{- end }}
+    {{- if and .Values.keda.enabled (not .Values.httpAddon.enabled) }}
+    # Prometheus-based autoscaling (only when HTTP Add-on is disabled)
     autoScaling:
       metrics:
         - type: External
@@ -61,3 +73,5 @@ spec:
       storageUri: {{ .Values.inferenceService.storageUri | default "oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-8b-instruct" }}
     tolerations:
       {{- toYaml .Values.tolerations | nindent 6 }}
+    nodeSelector:
+      {{- toYaml .Values.nodeSelector | nindent 6 }}

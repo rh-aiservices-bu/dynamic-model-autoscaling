@@ -142,9 +142,6 @@ sum(vllm:num_requests_waiting{model_name="llama3-2-3b"})
 
 # Active requests being processed
 sum(vllm:num_requests_running{model_name="llama3-2-3b"})
-
-# KV Cache utilization (0-1)
-vllm:kv_cache_usage_perc{model_name="llama3-2-3b"}
 ```
 
 ![Keda3](./assets/images/keda3.png)
@@ -163,3 +160,43 @@ Scaled from 1 → 3 pods based on `vllm:num_requests_waiting` exceeding the thre
 Expected behavior:
 - **Scale-up**: Pods increase from 1 to 3 within ~30-60 seconds when request queue grows
 - **Scale-down**: Pods return to 1 after ~5 minutes cooldown when load stops
+
+## Scale-to-Zero with KEDA HTTP Add-on
+
+For cost savings, you can enable scale-to-zero using the KEDA HTTP Add-on. This keeps the model at 0 replicas when idle and scales up on first request.
+
+### Install HTTP Add-on
+
+```bash
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda
+```
+
+### Deploy Model with Scale-to-Zero
+
+```bash
+# Get route hostname (deploy first without httpAddon to get the hostname)
+helm install llama3-2-3b helm/llama3.2-3b/ -n $NAMESPACE
+ROUTE_HOST=$(oc get route llama3-2-3b -n $NAMESPACE -o jsonpath='{.spec.host}')
+
+# Upgrade with HTTP Add-on enabled
+helm upgrade llama3-2-3b helm/llama3.2-3b/ \
+  --set keda.enabled=true \
+  --set httpAddon.enabled=true \
+  --set httpAddon.host=$ROUTE_HOST \
+  -n $NAMESPACE
+```
+
+### Verify Scale-to-Zero
+
+```bash
+# Check HTTPScaledObject and deployment
+oc get httpscaledobject,deployment -n $NAMESPACE
+
+# After 5 min idle, deployment should show 0/0 replicas
+# Send a request to trigger scale-up from 0 to 1
+curl -sk https://$ROUTE_HOST/v1/models
+```
+
+**Note**: First request after scale-to-zero takes 60-90 seconds while the model loads.

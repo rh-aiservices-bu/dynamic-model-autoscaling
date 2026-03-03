@@ -1,0 +1,14 @@
+apiVersion: v2
+name: keda-http-addon
+description: KEDA HTTP Add-on for scale-to-zero HTTP workloads
+type: application
+version: 1.0.0
+appVersion: "0.8.0"
+keywords:
+  - keda
+  - autoscaling
+  - http
+  - scale-to-zero
+home: https://github.com/kedacore/http-add-on
+sources:
+  - https://github.com/kedacore/http-add-on
