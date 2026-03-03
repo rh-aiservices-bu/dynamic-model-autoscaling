@@ -1,0 +1,37 @@
+{{- if .Values.keda.enabled }}
+# NOTE: ServiceAccount 'inference-prometheus-auth' is created automatically by
+# odh-model-controller's KEDA reconciler along with the TriggerAuthentication
+# and bearer token secret. Do NOT create the SA here as it causes conflicts.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: keda-autoscaling-metrics-{{ include "granite-3-3-8b.fullname" . }}
+  labels:
+    {{- include "granite-3-3-8b.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - monitoring.coreos.com
+    resources:
+      - prometheuses
+      - prometheuses/api
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: keda-autoscaling-metrics-{{ include "granite-3-3-8b.fullname" . }}
+  labels:
+    {{- include "granite-3-3-8b.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: keda-autoscaling-metrics-{{ include "granite-3-3-8b.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: inference-prometheus-auth
+    namespace: {{ .Release.Namespace }}
+{{- end }}

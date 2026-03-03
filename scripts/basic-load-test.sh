@@ -5,11 +5,38 @@
 # to observe KEDA autoscaling behavior
 #
 
-# Configuration
-API_BASE_URL="${API_BASE_URL:-https://llama32-llm.apps.ocp.zq97n.sandbox2467.opentlc.com/v1}"
-MODEL_NAME="${MODEL_NAME:-llama32}"
+# Configuration - auto-detect from cluster if not set
 NAMESPACE="${NAMESPACE:-llm}"
-DEPLOYMENT="${DEPLOYMENT:-llama-32-predictor}"
+
+# Auto-detect InferenceService and route
+if [ -z "$INFERENCESERVICE" ]; then
+    INFERENCESERVICE=$(oc get inferenceservice -n "$NAMESPACE" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
+    if [ -z "$INFERENCESERVICE" ]; then
+        echo "Error: No InferenceService found in namespace $NAMESPACE"
+        exit 1
+    fi
+fi
+
+DEPLOYMENT="${DEPLOYMENT:-${INFERENCESERVICE}-predictor}"
+
+# Auto-detect route URL
+if [ -z "$API_BASE_URL" ]; then
+    ROUTE_HOST=$(oc get route -n "$NAMESPACE" -o jsonpath='{.items[0].spec.host}' 2>/dev/null)
+    if [ -z "$ROUTE_HOST" ]; then
+        echo "Error: No route found in namespace $NAMESPACE"
+        exit 1
+    fi
+    API_BASE_URL="https://${ROUTE_HOST}/v1"
+fi
+
+# Auto-detect model name from ServingRuntime
+if [ -z "$MODEL_NAME" ]; then
+    MODEL_NAME=$(oc get servingruntime -n "$NAMESPACE" "$INFERENCESERVICE" -o jsonpath='{.spec.containers[0].args}' 2>/dev/null | sed -n 's/.*--served-model-name=\([^"]*\).*/\1/p' | head -1)
+    if [ -z "$MODEL_NAME" ]; then
+        MODEL_NAME="$INFERENCESERVICE"
+    fi
+fi
+
 DURATION="${DURATION:-120}"          # Duration in seconds
 RATE="${RATE:-10}"                   # Requests per second
 MAX_TOKENS="${MAX_TOKENS:-500}"      # Longer responses = more load
@@ -52,7 +79,7 @@ get_metrics() {
 
 # Function to get pod count
 get_pod_count() {
-    oc get pods -n "$NAMESPACE" -l serving.kserve.io/inferenceservice="${DEPLOYMENT%-predictor}" --no-headers 2>/dev/null | grep -c "Running"
+    oc get pods -n "$NAMESPACE" -l serving.kserve.io/inferenceservice="$INFERENCESERVICE" --no-headers 2>/dev/null | grep -c "Running"
 }
 
 # Function to check HPA/ScaledObject status

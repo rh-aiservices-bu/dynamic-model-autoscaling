@@ -1,0 +1,6 @@
+apiVersion: v2
+name: keda
+description: KEDA Controller configuration for OpenShift
+type: application
+version: 1.0.0
+appVersion: "2.16"

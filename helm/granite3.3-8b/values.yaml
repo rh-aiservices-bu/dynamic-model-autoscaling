@@ -1,79 +1,6 @@
-# Default values for granite-3-3-8b
-replicaCount: 1
+# Default values for granite3.3-8b
 
-image:
-  repository: 'quay.io/modh/vllm'
-  tag: "rhoai-2.22-cuda-5e9c649953464aa3a668aba1774e42fc933f721b"
-  pullPolicy: IfNotPresent
-
-imagePullSecrets: []
-nameOverride: ""
-fullnameOverride: ""
-
-serviceAccount:
-  create: true
-  annotations: {}
-  name: ""
-
-podAnnotations: {}
-
-podSecurityContext:
-  runAsNonRoot: false
-  fsGroup: 2000
-
-securityContext:
-  allowPrivilegeEscalation: false
-  capabilities:
-    drop:
-    - ALL
-
-# Model configuration
-model:
-  name: "ibm-granite/granite-3.3-8b-instruct"
-  maxModelLen: 2048      # Optimized for granite (vs 65000 for llama)
-  maxNumSeqs: 32         # Granite-specific parameter
-  disableLogRequests: true
-  # gpuMemoryUtilization: 0.90
-  # quantization: ""  # Options: awq, gptq, squeezellm, fp8
-  # dtype: "auto"     # Options: auto, half, float16, bfloat16, float32
-
-# vLLM server configuration
-vllm:
-  host: "0.0.0.0"
-  port: 8000
-  apiKey: ""  # Optional API key
-  enableLogging: true
-  logLevel: "info"
-  maxLogLen: 2048
-  disableLogStats: false
-
-service:
-  type: ClusterIP
-  port: 80
-  targetPort: 8000
-  annotations: {}
-
-route:
-  enabled: true
-  annotations: {}
-  host: ""
-  tls:
-    enabled: true
-    termination: edge
-    insecureEdgeTerminationPolicy: Redirect
-
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: granite-3-3-8b.local
-      paths:
-        - path: /
-          pathType: Prefix
-  tls: []
-
-# Resource requirements (optimized for granite 8B model)
+# Resource requirements
 resources:
   limits:
     nvidia.com/gpu: 1
@@ -84,97 +11,11 @@ resources:
     memory: 8Gi
     cpu: 2
 
-livenessProbe:
-  httpGet:
-    path: /health
-    port: http
-  initialDelaySeconds: 120
-  periodSeconds: 30
-  timeoutSeconds: 10
-  failureThreshold: 3
-
-readinessProbe:
-  httpGet:
-    path: /health
-    port: http
-  initialDelaySeconds: 60
-  periodSeconds: 10
-  timeoutSeconds: 5
-  failureThreshold: 3
-
 # KEDA Autoscaling Configuration
 keda:
-  enabled: true
-  # ScaledObject configuration
-  scaledobject:
-    pollingInterval: 15  # How often KEDA checks metrics (seconds)
-    cooldownPeriod: 300  # Cooldown before scaling down (seconds, 5 minutes)
-    minReplicaCount: 0   # Can scale to zero (set to 1 to always have one pod)
-    maxReplicaCount: 5   # Maximum number of replicas
-
-    # Scaling behavior (optional advanced configuration)
-    behavior:
-      scaleDown:
-        stabilizationWindowSeconds: 300
-        policies:
-        - type: Percent
-          value: 50
-          periodSeconds: 60
-
-    # Primary trigger: Queue-based scaling (recommended)
-    triggers:
-      # vLLM requests waiting in queue
-      - type: prometheus
-        enabled: true
-        metricName: vllm_requests_waiting
-        threshold: '3'  # Scale up when 3+ requests are queued
-        query: |
-          sum(vllm:num_requests_waiting{namespace="{{ .Release.Namespace }}",pod=~"{{ include "granite-3-3-8b.fullname" . }}-predictor.*"})
-
-      # Alternative/Additional: Request rate trigger
-      - type: prometheus
-        enabled: false  # Enable for rate-based scaling
-        metricName: vllm_request_rate
-        threshold: '2'  # 2 requests/sec per replica
-        query: |
-          sum(rate(vllm:request_success_total{namespace="{{ .Release.Namespace }}",pod=~"{{ include "granite-3-3-8b.fullname" . }}-predictor.*"}[2m]))
-
-      # Alternative: Running requests trigger
-      - type: prometheus
-        enabled: false  # Enable for immediate response to active requests
-        metricName: vllm_requests_running
-        threshold: '1'  # Scale up when any request is running
-        query: |
-          sum(vllm:num_requests_running{namespace="{{ .Release.Namespace }}",pod=~"{{ include "granite-3-3-8b.fullname" . }}-predictor.*"})
-
-  # Prometheus authentication for Thanos Querier
-  prometheus:
-    serverAddress: "https://thanos-querier.openshift-monitoring.svc.cluster.local:9091"
-    authModes: "bearer"
-    # Secret name containing 'token' and 'ca.crt' keys
-    # Create with: oc create secret generic keda-prometheus-secret \
-    #   --from-literal=token="$(oc create token thanos-querier -n openshift-monitoring --duration=8760h)" \
-    #   --from-literal=ca.crt="$(oc get secret thanos-querier-tls -n openshift-monitoring -o jsonpath='{.data.tls\.crt}' | base64 -d)"
-    secretName: "keda-prometheus-secret"
-    namespace: ""  # Defaults to Release namespace
-
-# Monitoring Configuration
-monitoring:
-  enabled: true
-  # ServiceMonitor for Prometheus metrics scraping
-  serviceMonitor:
-    enabled: true
-    interval: 30s
-    scrapeTimeout: 10s
-    # Metrics endpoint configuration
-    metricsPath: /metrics
-    metricsPort: 8080  # vLLM metrics port
-    # Additional labels for ServiceMonitor
-    labels: {}
-    # Prometheus instance selector (for user-workload-monitoring)
-    namespaceSelector:
-      matchNames:
-        - "{{ .Release.Namespace }}"
+  enabled: false
+  threshold: 2
+  query: 'sum(vllm:num_requests_waiting{model_name="granite-8b"})'
 
 nodeSelector:
   nvidia.com/gpu.present: "true"
@@ -185,64 +26,24 @@ tolerations:
     operator: Equal
     value: "True"
 
-affinity:
-  nodeAffinity:
-    requiredDuringSchedulingIgnoredDuringExecution:
-      nodeSelectorTerms:
-      - matchExpressions:
-        - key: nvidia.com/gpu.present
-          operator: In
-          values:
-          - "true"
-
-# Persistent Volume for model cache
-persistence:
-  enabled: true
-  storageClass: ""
-  accessMode: ReadWriteOnce
-  size: 40Gi  # Smaller than llama (40Gi vs 50Gi)
-  mountPath: /root/.cache
-
-# Environment variables
-env:
-  CUDA_VISIBLE_DEVICES: "0"
-  TRANSFORMERS_CACHE: "/root/.cache/huggingface"
-  HF_HOME: "/tmp/hf_home"
+# Model configuration
+model:
+  maxModelLen: 2048
+  maxNumSeqs: 32
+  disableLogRequests: true
 
 # InferenceService configuration
 inferenceService:
   displayName: "granite-3.3-8b"
-  maxReplicas: 1
+  maxReplicas: 3
   minReplicas: 1
   modelFormat: "vLLM"
   modelName: ""
-  runtime: ""  # Will default to chart fullname if not specified
   storageUri: "oci://quay.io/redhat-ai-services/modelcar-catalog:granite-3.3-8b-instruct"
   deploymentMode: "RawDeployment"
   automountServiceAccountToken: false
-  # Note: When keda.enabled=true, the annotation 'serving.kserve.io/autoscalerClass: external'
-  # is automatically added to disable KServe's built-in autoscaler and let KEDA manage scaling
 
 # Serving Runtime configuration
 servingRuntime:
-  enabled: true  # Set to true to create a ServingRuntime resource
-  image: "quay.io/modh/vllm:rhoai-2.22-cuda-5e9c649953464aa3a668aba1774e42fc933f721b"
+  image: "registry.redhat.io/rhaiis/vllm-cuda-rhel9@sha256:094db84a1da5e8a575d0c9eade114fa30f4a2061064a338e3e032f3578f8082a"
   servedModelName: "granite-8b"
-  shmSizeLimit: "2Gi"  # Granite needs 2Gi vs 1Gi for llama
-
-  # Prometheus annotations
-  annotations:
-    prometheus.io/path: /metrics
-    prometheus.io/port: '8080'
-
-# Network Policies
-networkPolicy:
-  enabled: false
-  ingress:
-    - from:
-      - namespaceSelector:
-          matchLabels:
-            name: openshift-ingress
-      ports:
-      - protocol: TCP
-        port: 8000
