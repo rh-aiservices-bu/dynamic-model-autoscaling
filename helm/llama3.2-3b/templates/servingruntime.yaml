@@ -1,7 +1,7 @@
 apiVersion: serving.kserve.io/v1alpha1
 kind: ServingRuntime
 metadata:
-  name: llama3-2-3b
+  name: {{ include "llama3-2-3b.fullname" . }}
   labels:
     {{- include "llama3-2-3b.labels" . | nindent 4 }}
     opendatahub.io/dashboard: 'true'

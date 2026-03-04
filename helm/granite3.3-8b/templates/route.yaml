@@ -1,13 +1,25 @@
+---
 apiVersion: route.openshift.io/v1
 kind: Route
 metadata:
-  name: {{ include "granite-3-3-8b.fullname" . }}
+  # Use a different name than the InferenceService to prevent odh-model-controller from deleting it
+  # (odh-model-controller deletes routes matching ISVC name when visibility != exposed)
+  name: {{ include "granite-3-3-8b.fullname" . }}-keda
   labels:
     {{- include "granite-3-3-8b.labels" . | nindent 4 }}
   annotations:
     openshift.io/display-name: {{ .Values.inferenceService.displayName | default "granite-3.3-8b" }}
+    {{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+    keda.sh/http-addon-enabled: "true"
+    # HAProxy timeout for LLM cold starts (default 30s is too short)
+    haproxy.router.openshift.io/timeout: 180s
+    {{- end }}
 spec:
+  {{- if and .Values.keda.enabled .Values.httpAddon.enabled .Values.httpAddon.host }}
+  host: {{ .Values.httpAddon.host }}
+  {{- else }}
   host: ""
+  {{- end }}
   port:
     targetPort: http
   tls:
@@ -15,6 +27,59 @@ spec:
     insecureEdgeTerminationPolicy: Redirect
   to:
     kind: Service
+    {{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+    # Route to HTTP Add-on interceptor for scale-to-zero support
+    name: {{ include "granite-3-3-8b.fullname" . }}-interceptor-proxy
+    {{- else }}
+    # Route directly to predictor service
     name: {{ include "granite-3-3-8b.fullname" . }}-predictor
+    {{- end }}
     weight: 100
   wildcardPolicy: None
+{{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+{{- $kedaNamespace := .Values.httpAddon.kedaNamespace | default "openshift-keda" }}
+{{- /* Try lookup first, fall back to values.yaml if provided */ -}}
+{{- $interceptorSvc := lookup "v1" "Service" $kedaNamespace "keda-add-ons-http-interceptor-proxy" }}
+{{- $interceptorIP := "" }}
+{{- if $interceptorSvc }}
+  {{- $interceptorIP = $interceptorSvc.spec.clusterIP }}
+{{- else if .Values.httpAddon.interceptorIP }}
+  {{- $interceptorIP = .Values.httpAddon.interceptorIP }}
+{{- else }}
+  {{- fail "KEDA HTTP Add-on interceptor not found. Either:\n  1. Install HTTP Add-on: helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda\n  2. Or provide interceptorIP: oc get svc keda-add-ons-http-interceptor-proxy -n openshift-keda -o jsonpath='{.spec.clusterIP}'" }}
+{{- end }}
+---
+# ClusterIP service that proxies to interceptor via Endpoints
+# Note: ExternalName services don't work with OpenShift routes (no endpoints)
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "granite-3-3-8b.fullname" . }}-interceptor-proxy
+  labels:
+    {{- include "granite-3-3-8b.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+---
+# Endpoints object pointing to interceptor service ClusterIP
+# This allows OpenShift routes to work with cross-namespace services
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: {{ include "granite-3-3-8b.fullname" . }}-interceptor-proxy
+  labels:
+    {{- include "granite-3-3-8b.labels" . | nindent 4 }}
+  annotations:
+    description: "Endpoints for KEDA HTTP Add-on interceptor proxy"
+subsets:
+  - addresses:
+      - ip: {{ $interceptorIP }}
+    ports:
+      - port: 8080
+        protocol: TCP
+        name: http
+{{- end }}

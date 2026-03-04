@@ -11,11 +11,34 @@ resources:
     memory: 8Gi
     cpu: 1
 
-# KEDA Autoscaling Configuration
+# KEDA Autoscaling Configuration (Prometheus-based, 1→N scaling)
 keda:
   enabled: false
   threshold: 2
   query: 'sum(vllm:num_requests_waiting{model_name="llama3-2-3b"})'
+
+# HTTP Add-on for scale-to-zero (requires keda.enabled=true)
+# Enables 0→N scaling using KEDA HTTP Add-on interceptor
+httpAddon:
+  enabled: false
+  # Required: Route hostname (e.g., llama3-2-3b-llm.apps.cluster.example.com)
+  host: ""
+  # Path prefixes to apply scaling rule
+  pathPrefixes:
+    - /v1
+  # Scaling configuration
+  minReplicas: 0
+  maxReplicas: 3
+  scaledownPeriod: 300  # 5 minutes before scaling to zero
+  targetValue: 2        # Scale up at 2 req/s per replica
+  granularity: "1s"
+  window: "1m"
+  # KEDA namespace where HTTP Add-on is installed
+  kedaNamespace: openshift-keda
+  # Optional: Interceptor ClusterIP (auto-detected if empty)
+  # Use this if helm template fails or for GitOps workflows
+  # Get with: oc get svc keda-add-ons-http-interceptor-proxy -n openshift-keda -o jsonpath='{.spec.clusterIP}'
+  interceptorIP: ""
 
 nodeSelector:
   nvidia.com/gpu.present: "true"

@@ -1,0 +1,35 @@
+{{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
+---
+apiVersion: http.keda.sh/v1alpha1
+kind: HTTPScaledObject
+metadata:
+  name: {{ include "llama3-2-3b.fullname" . }}
+  labels:
+    {{- include "llama3-2-3b.labels" . | nindent 4 }}
+spec:
+  hosts:
+    - {{ required "httpAddon.host is required when httpAddon.enabled=true" .Values.httpAddon.host }}
+  pathPrefixes:
+    {{- if .Values.httpAddon.pathPrefixes }}
+    {{- range .Values.httpAddon.pathPrefixes }}
+    - {{ . | quote }}
+    {{- end }}
+    {{- else }}
+    - /v1
+    {{- end }}
+  scaleTargetRef:
+    name: {{ include "llama3-2-3b.fullname" . }}-predictor
+    kind: Deployment
+    apiVersion: apps/v1
+    service: {{ include "llama3-2-3b.fullname" . }}-predictor
+    port: 80
+  replicas:
+    min: {{ .Values.httpAddon.minReplicas | default 0 }}
+    max: {{ .Values.httpAddon.maxReplicas | default (.Values.inferenceService.maxReplicas | default 3) }}
+  scaledownPeriod: {{ .Values.httpAddon.scaledownPeriod | default 300 }}
+  scalingMetric:
+    requestRate:
+      granularity: {{ .Values.httpAddon.granularity | default "1s" }}
+      targetValue: {{ .Values.httpAddon.targetValue | default 2 }}
+      window: {{ .Values.httpAddon.window | default "1m" }}
+{{- end }}

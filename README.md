@@ -1,36 +1,46 @@
 # Dynamic Model Autoscaling with KEDA
 
-Metrics-based autoscaling for LLM inference services on OpenShift AI, helping you efficiently manage GPU resources, lower operational costs, and ensure performance requirements are met.
+Metrics-based autoscaling for LLM inference services on OpenShift AI using KEDA and vLLM metrics. Scale GPU workloads efficiently based on request queue depth.
 
-This project uses the OpenShift Custom Metrics Autoscaler (CMA), based on Kubernetes Event-driven Autoscaling (KEDA), to autoscale KServe InferenceServices in RawDeployment mode. It leverages vLLM runtime metrics available in OpenShift Monitoring to trigger scaling, such as:
+## Table of Contents
 
-- **Request queue depth** (`vllm:num_requests_waiting`)
-- **Active requests** (`vllm:num_requests_running`)
-- **KV Cache utilization**
-- **Time to First Token (TTFT)**
+- [Architecture](#architecture)
+- [Installation](#installation)
+- [Demo](#demo)
+  - [Verify Autoscaling Setup](#verify-autoscaling-setup)
+  - [Run Load Test](#run-load-test)
+  - [Check the Metrics](#check-the-metrics)
+  - [Watch Scaling in Action](#watch-scaling-in-action)
+- [Scale-to-Zero with KEDA HTTP Add-on](#scale-to-zero-with-keda-http-addon)
 
 ## Architecture
 
 ![Arch](./assets/images/keda1.png)
 
-- **vLLM**: High-performance LLM inference server exposing Prometheus metrics
-- **KServe**: Model serving with InferenceService (RawDeployment mode)
-- **KEDA**: Event-driven autoscaling triggered by vLLM metrics
-- **Prometheus/Thanos**: Metrics collection via OpenShift User Workload Monitoring
+Knative autoscaling is not available in KServe RawDeployment mode. This project uses **KEDA** (Kubernetes Event-driven Autoscaling) to scale InferenceServices based on vLLM Prometheus metrics:
 
-### How It Works
+1. vLLM exposes `num_requests_waiting` and `num_requests_running` metrics
+2. Prometheus scrapes metrics via ServiceMonitor → Thanos Querier
+3. KEDA scales deployment when queue depth exceeds threshold
+4. Scale-up: ~30-60s | Scale-down: ~5 min cooldown
 
-1. vLLM exposes metrics like `num_requests_waiting` and `num_requests_running`
-2. Prometheus scrapes these metrics via ServiceMonitor
-3. KEDA queries Thanos and scales the deployment based on configured thresholds
-4. Scale-up is triggered within ~30-60 seconds; scale-down after ~5 minutes cooldown
+### Automatic KEDA Integration
 
-## Prerequisites
+Setting `serving.kserve.io/autoscalerClass: keda` on your InferenceService triggers **odh-model-controller** to automatically create:
 
-- OpenShift AI cluster with GPU nodes
-- Cluster admin access
+- TriggerAuthentication, ServiceAccount, Role, RoleBinding, Secret
+- ScaledObject with Prometheus trigger
+
+No manual KEDA configuration required.
 
 ## Installation
+
+> **Reference**: This guide is based on the official Red Hat documentation for [Configuring metrics-based autoscaling](https://docs.redhat.com/en/documentation/red_hat_openshift_ai_self-managed/2.19/html/serving_models/serving-large-models_serving-large-models#configuring-metrics-based-autoscaling_serving-large-models)
+
+### Step 0: Prerequisites
+
+- OpenShift AI cluster with GPU nodes (3.0+)
+- Cluster admin access
 
 ### Step 1: Install KEDA Operator
 
@@ -61,7 +71,7 @@ export NAMESPACE=llm
 oc new-project $NAMESPACE
 helm install llama3-2-3b helm/llama3.2-3b/ \
   --set keda.enabled=true \
-  --set inferenceService.maxReplicas=3 \
+  --set inferenceService.maxReplicas=2 \
   -n $NAMESPACE
 ```
 
@@ -72,7 +82,7 @@ export NAMESPACE=llm
 oc new-project $NAMESPACE
 helm install granite3-3-8b helm/granite3.3-8b/ \
   --set keda.enabled=true \
-  --set inferenceService.maxReplicas=3 \
+  --set inferenceService.maxReplicas=2 \
   -n $NAMESPACE
 ```
 
@@ -142,9 +152,6 @@ sum(vllm:num_requests_waiting{model_name="llama3-2-3b"})
 
 # Active requests being processed
 sum(vllm:num_requests_running{model_name="llama3-2-3b"})
-
-# KV Cache utilization (0-1)
-vllm:kv_cache_usage_perc{model_name="llama3-2-3b"}
 ```
 
 ![Keda3](./assets/images/keda3.png)
@@ -163,3 +170,63 @@ Scaled from 1 → 3 pods based on `vllm:num_requests_waiting` exceeding the thre
 Expected behavior:
 - **Scale-up**: Pods increase from 1 to 3 within ~30-60 seconds when request queue grows
 - **Scale-down**: Pods return to 1 after ~5 minutes cooldown when load stops
+
+### Why Prometheus-based KEDA Cannot Scale to Zero
+
+Prometheus-based KEDA autoscaling works well for 1→N scaling, but **cannot scale to zero** because:
+
+1. **No metrics at zero replicas**: When pods = 0, no vLLM instance is running to generate Prometheus metrics
+2. **No endpoints for traffic**: The Route/Service points to a backend with no endpoints, returning 503 errors
+3. **KEDA can't detect load**: Without metrics, KEDA never sees incoming traffic and never triggers scale-up
+
+```
+Request → Route → Service (no endpoints) → 503 Error ❌
+```
+
+This creates a chicken-and-egg problem: KEDA needs metrics to scale up, but metrics only exist when pods are running.
+
+## Scale-to-Zero with KEDA HTTP Add-on
+
+For cost savings, you can enable scale-to-zero using the KEDA HTTP Add-on. This keeps the model at 0 replicas when idle and scales up on first request.
+
+> **See the full demo guide**: [Demo: Scale-to-Zero with KEDA HTTP Add-on](assets/docs/demo-http-addon.md)
+>
+> **Architecture details**: [KEDA HTTP Add-on Architecture](assets/docs/autoscaling-keda-http-addon.md)
+
+### Quick Start
+
+```bash
+# Install HTTP Add-on with extended timeouts for LLM cold starts
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda \
+  --set interceptor.replicas.waitTimeout=180s \
+  --set interceptor.responseHeaderTimeout=180s
+
+# Deploy model with scale-to-zero
+ROUTE_HOST="llama3-2-3b-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
+
+helm install llama3-2-3b helm/llama3.2-3b/ \
+  --set keda.enabled=true \
+  --set httpAddon.enabled=true \
+  --set httpAddon.host=$ROUTE_HOST \
+  --set httpAddon.minReplicas=0 \
+  --set httpAddon.maxReplicas=1 \
+  --set httpAddon.scaledownPeriod=60 \
+  -n $NAMESPACE
+```
+
+### Verify Scale-to-Zero
+
+```bash
+# Check HTTPScaledObject
+oc get httpscaledobject -n $NAMESPACE
+
+# After scaledownPeriod (default 60s), pods scale to 0
+oc get pods -n $NAMESPACE
+
+# Send a request to trigger scale-up from 0 to 1
+curl -sk https://$ROUTE_HOST/v1/models
+```
+
+**Note**: First request after scale-to-zero takes 60-90 seconds while the model loads.
