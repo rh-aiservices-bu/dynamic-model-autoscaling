@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@modelcontextprotocol/ext-apps": "^1.1.2"
+  }
+}

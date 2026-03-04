@@ -1,48 +1,6 @@
 # KEDA HTTP Add-on Autoscaling (0→N)
 
-```
-                                    ┌─────────────────────────────────────────────────────────┐
-                                    │                   openshift-keda namespace              │
-                                    │                                                         │
-┌──────────┐    ┌──────────┐       │  ┌─────────────┐   queue    ┌─────────────┐            │
-│  Client  │───▶│  Route   │───────┼─▶│ Interceptor │───metrics─▶│   Scaler    │            │
-│          │    │ (*-keda) │       │  │   (proxy)   │            │             │            │
-└──────────┘    └──────────┘       │  └──────┬──────┘            └──────┬──────┘            │
-                     │             │         │                          │                    │
-                     │             │         │ forwards                 │ reports            │
-                     │             │         │ (when ready)             │ metrics            │
-                     │             │         │                          ▼                    │
-                     │             │         │                   ┌─────────────┐            │
-                     │             │         │                   │  Operator   │            │
-                     │             │         │                   │             │            │
-                     │             │         │                   └──────┬──────┘            │
-                     │             └─────────┼──────────────────────────┼────────────────────┘
-                     │                       │                          │
-                     │                       │                          │ creates/manages
-                     │                       │                          ▼
-                     │                       │                   ┌─────────────────┐
-                     │                       │                   │  ScaledObject   │
-                     │                       │                   │ (external-push) │
-                     │                       │                   └────────┬────────┘
-                     │                       │                            │
-                     │                       │                            │ scales
-                     │                       │                            ▼
-┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│                                    llm namespace                                          │
-│                                                                                          │
-│  ┌──────────────────┐         ┌──────────────────┐         ┌──────────────────┐         │
-│  │ HTTPScaledObject │────────▶│   Deployment     │◀────────│ InferenceService │         │
-│  │                  │ targets │ (0 → N replicas) │ creates │                  │         │
-│  └──────────────────┘         └────────┬─────────┘         └──────────────────┘         │
-│                                        │                                                 │
-│                                        │ runs                                            │
-│                                        ▼                                                 │
-│                               ┌──────────────────┐                                      │
-│                               │    vLLM Pod      │                                      │
-│                               │  (model server)  │                                      │
-│                               └──────────────────┘                                      │
-└──────────────────────────────────────────────────────────────────────────────────────────┘
-```
+![KEDA HTTP Add-on Autoscaling (0->N)](../images/http-addon1.png)
 
 ## Step 1: Client Request Arrives
 
@@ -63,9 +21,23 @@ The Interceptor (always running in `openshift-keda`):
 - Increments queue depth metric
 - Reports metrics to the Scaler
 
-## Step 3: Scaler Reports to KEDA Operator
+## Step 3: KEDA Core Queries the Scaler
 
-The Scaler aggregates queue metrics and exposes them to KEDA via `external-push` trigger.
+**KEDA Core** (`keda-operator`) polls the HTTP Add-on **Scaler** (`keda-add-ons-http-external-scaler`) via gRPC:
+
+```yaml
+# ScaledObject trigger (auto-created by HTTP Add-on Operator)
+triggers:
+  - type: external-push
+    metadata:
+      scalerAddress: keda-add-ons-http-external-scaler.openshift-keda:9090
+```
+
+The Scaler returns queue depth metrics collected from the Interceptor.
+
+> **Note**: The diagram shows "HTTP Add-on KEDA Core" as a single box for simplicity. In reality, these are **two separate components**:
+> - **KEDA Core** (`keda-operator`) - Polls the Scaler for metrics and makes scaling decisions
+> - **HTTP Add-on Operator** (`keda-add-ons-http-controller-manager`) - Watches HTTPScaledObjects and creates ScaledObjects
 
 ## Step 4: Operator Creates ScaledObject
 
@@ -110,65 +82,18 @@ After `scaledownPeriod` (default 300s) with no traffic:
 
 ## Object Locations
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           openshift-keda namespace                               │
-│                                                                                  │
-│   Installed via: helm install keda kedacore/keda                                 │
-│                  helm install http-add-on kedacore/keda-add-ons-http            │
-│                                                                                  │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
-│   │  KEDA Operator  │  │ HTTP Operator   │  │   Interceptor   │                 │
-│   │   (Deployment)  │  │  (Deployment)   │  │  (Deployment)   │                 │
-│   └─────────────────┘  └─────────────────┘  └─────────────────┘                 │
-│                                                                                  │
-│   ┌─────────────────┐  ┌─────────────────┐                                      │
-│   │     Scaler      │  │ Interceptor Svc │                                      │
-│   │  (Deployment)   │  │   (ClusterIP)   │◀── Cross-namespace target            │
-│   └─────────────────┘  └─────────────────┘                                      │
-└─────────────────────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              llm namespace (user)                                │
-│                                                                                  │
-│   Installed via: helm install llama3-2-3b helm/llama3.2-3b/                     │
-│                                                                                  │
-│   USER-CREATED (Helm):                                                          │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
-│   │InferenceService │  │HTTPScaledObject │  │  Route (*-keda) │                 │
-│   │ (KServe CRD)    │  │ (KEDA HTTP CRD) │  │   (OpenShift)   │                 │
-│   └────────┬────────┘  └────────┬────────┘  └─────────────────┘                 │
-│            │                    │                                                │
-│            │ creates            │ creates                                        │
-│            ▼                    ▼                                                │
-│   AUTO-CREATED:                                                                  │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
-│   │   Deployment    │  │  ScaledObject   │  │      HPA        │                 │
-│   │ (*-predictor)   │  │ (external-push) │  │ (keda-hpa-*)    │                 │
-│   └────────┬────────┘  └─────────────────┘  └─────────────────┘                 │
-│            │                                                                     │
-│            │ runs                                                                │
-│            ▼                                                                     │
-│   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                 │
-│   │   vLLM Pod(s)   │  │  Service        │  │  ServingRuntime │                 │
-│   │   (0→N)         │  │ (*-predictor)   │  │   (KServe CRD)  │                 │
-│   └─────────────────┘  └─────────────────┘  └─────────────────┘                 │
-│                                                                                  │
-│   ROUTING (for cross-namespace):                                                │
-│   ┌─────────────────┐  ┌─────────────────┐                                      │
-│   │     Service     │  │    Endpoints    │                                      │
-│   │*-interceptor-   │─▶│*-interceptor-   │──▶ openshift-keda interceptor        │
-│   │  proxy (no sel) │  │  proxy (manual) │                                      │
-│   └─────────────────┘  └─────────────────┘                                      │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Key Components Summary](../images/http-addon2.png)
 
 ## Key Components Summary
 
+> **Note**: The diagram shows "HTTP Add-on KEDA Core" as a single box for simplicity. In reality, these are **two separate components**:
+> - **KEDA Core** (`keda-operator`) - Polls the Scaler for metrics and makes scaling decisions
+> - **HTTP Add-on Operator** (`keda-add-ons-http-controller-manager`) - Watches HTTPScaledObjects and creates ScaledObjects
+
 | Component | Namespace | Created By | Purpose |
 |-----------|-----------|------------|---------|
-| KEDA Operator | openshift-keda | Helm (keda) | Core KEDA controller |
-| HTTP Operator | openshift-keda | Helm (http-add-on) | Watches HTTPScaledObject |
+| KEDA Core (keda-operator) | openshift-keda | Helm (keda) | Polls Scaler, makes scaling decisions, manages HPA |
+| HTTP Operator | openshift-keda | Helm (http-add-on) | Watches HTTPScaledObject, creates ScaledObject |
 | Interceptor | openshift-keda | Helm (http-add-on) | Queues requests, reports metrics |
 | Scaler | openshift-keda | Helm (http-add-on) | Aggregates metrics for KEDA |
 | InferenceService | llm | Helm (model chart) | KServe model definition |
@@ -222,34 +147,7 @@ annotations:
 
 OpenShift Routes require endpoints to exist, but the Interceptor runs in `openshift-keda` while our Route is in `llm`. ExternalName services don't work with Routes, so we use a **ClusterIP + manual Endpoints** pattern:
 
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                              llm namespace                                       │
-│                                                                                  │
-│  ┌────────────┐      ┌──────────────────────────┐     ┌────────────────────┐    │
-│  │   Route    │─────▶│        Service           │────▶│     Endpoints      │    │
-│  │ (*-keda)   │      │ *-interceptor-proxy      │     │ *-interceptor-proxy│    │
-│  └────────────┘      │ ClusterIP (no selector)  │     │ IP: 172.30.x.x     │    │
-│                      └──────────────────────────┘     └─────────┬──────────┘    │
-│                                                                 │               │
-└─────────────────────────────────────────────────────────────────┼───────────────┘
-                                                                  │ points to
-                                                                  ▼
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           openshift-keda namespace                               │
-│                                                                                  │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                  keda-add-ons-http-interceptor-proxy                      │   │
-│  │                        ClusterIP: 172.30.x.x                              │   │
-│  └─────────────────────────────────┬────────────────────────────────────────┘   │
-│                                    │ selector                                    │
-│                                    ▼                                             │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │                     Interceptor Pods (3 replicas)                         │   │
-│  │   Queues requests, reports metrics, forwards when backend is ready       │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+![Cross-Namespace Routing Pattern](../images/http-addon3.png)
 
 **How it works:**
 

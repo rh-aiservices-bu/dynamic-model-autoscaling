@@ -45,14 +45,20 @@ oc get pods -n openshift-keda | grep http
 Enable HTTP Add-on in model deployments for scale-to-zero:
 
 ```bash
-# Get your route hostname
-ROUTE_HOST=$(oc get route llama3-2-3b -n llm -o jsonpath='{.spec.host}')
+# Set release name and namespace
+RELEASE_NAME=llama3-2-3b
+NAMESPACE=llm
 
-helm upgrade llama3-2-3b ../llama3.2-3b/ \
+# Generate route hostname (based on release name)
+ROUTE_HOST="${RELEASE_NAME}-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
+
+helm upgrade $RELEASE_NAME ../llama3.2-3b/ \
   --set keda.enabled=true \
   --set httpAddon.enabled=true \
   --set httpAddon.host=$ROUTE_HOST \
-  -n llm
+  --set httpAddon.minReplicas=0 \
+  --set httpAddon.maxReplicas=1 \
+  -n $NAMESPACE
 ```
 
 ## How It Works

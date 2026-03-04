@@ -67,7 +67,7 @@ helm install keda helm/keda/ -n openshift-keda
 **Option A: Llama 3.2-3B**
 
 ```bash
-export NAMESPACE=llm
+export NAMESPACE=autoscaling-keda
 oc new-project $NAMESPACE
 helm install llama3-2-3b helm/llama3.2-3b/ \
   --set keda.enabled=true \
@@ -78,7 +78,7 @@ helm install llama3-2-3b helm/llama3.2-3b/ \
 **Option B: Granite 3.3-8B**
 
 ```bash
-export NAMESPACE=llm
+export NAMESPACE=autoscaling-keda
 oc new-project $NAMESPACE
 helm install granite3-3-8b helm/granite3.3-8b/ \
   --set keda.enabled=true \
@@ -112,9 +112,9 @@ DURATION=60 RATE=20 NAMESPACE=$NAMESPACE ./scripts/basic-load-test.sh
 ════════════════════════════════════════════════════════════════════════════════╗
 ║  KEDA Autoscaling Load Test - vLLM Metrics Monitor                             ║
 ╠════════════════════════════════════════════════════════════════════════════════╣
-║  Endpoint:    https://llama3-2-3b-llm.apps.XXXX/v1
+║  Endpoint:    https://llama3-2-3b-autoscaling-keda.apps.XXXX/v1
 ║  Model:       llama3-2-3b
-║  Namespace:   llm
+║  Namespace:   autoscaling-keda
 ║  Deployment:  llama3-2-3b-predictor
 ║  Duration:    60s @ 20 req/s
 ║  Max Tokens:  500 (longer = more load)
@@ -196,6 +196,9 @@ For cost savings, you can enable scale-to-zero using the KEDA HTTP Add-on. This 
 ### Quick Start
 
 ```bash
+export NAMESPACE=autoscaling-keda-http-addon
+oc new-project $NAMESPACE
+
 # Install HTTP Add-on with extended timeouts for LLM cold starts
 helm repo add kedacore https://kedacore.github.io/charts
 helm repo update
@@ -204,9 +207,10 @@ helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda \
   --set interceptor.responseHeaderTimeout=180s
 
 # Deploy model with scale-to-zero
-ROUTE_HOST="llama3-2-3b-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
+RELEASE_NAME=llama3-2-3b
+ROUTE_HOST="${RELEASE_NAME}-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
 
-helm install llama3-2-3b helm/llama3.2-3b/ \
+helm install $RELEASE_NAME helm/llama3.2-3b/ \
   --set keda.enabled=true \
   --set httpAddon.enabled=true \
   --set httpAddon.host=$ROUTE_HOST \

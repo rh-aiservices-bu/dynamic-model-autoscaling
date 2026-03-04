@@ -209,3 +209,5 @@ __marimo__/
 CLAUDE.md
 *KEDA-README.md*
 .claude/
+
+node_modules/

@@ -2,6 +2,7 @@
 
 This demo shows how to enable scale-to-zero for LLM inference services using the KEDA HTTP Add-on. When idle, the model scales to 0 replicas (releasing GPU resources), and automatically scales up when requests arrive.
 
+
 ## Prerequisites
 
 - KEDA Operator installed in `openshift-keda` namespace
@@ -20,6 +21,8 @@ The KEDA HTTP Add-on solves the scale-to-zero problem by providing an always-on 
 ```
 With HTTP Add-on:  Request → Route → Interceptor → Queue → KEDA 0→1 → Forward ✓
 ```
+
+![KEDA HTTP Add-on Autoscaling (0->N)](../images/http-addon1.png)
 
 For detailed architecture, see [KEDA HTTP Add-on Architecture](autoscaling-keda-http-addon.md).
 
@@ -51,14 +54,15 @@ keda-add-ons-http-scaler-xxx               1/1     Running
 ## Step 2: Deploy Model with Scale-to-Zero
 
 ```bash
-export NAMESPACE=llm
+export NAMESPACE=autoscaling-keda-http-addon
 oc new-project $NAMESPACE
 
 # Deploy with HTTP Add-on enabled
-# First, get the route hostname pattern
-ROUTE_HOST="llama3-2-3b-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
+# First, get the route hostname pattern (based on release name)
+RELEASE_NAME=llama3-2-3b
+ROUTE_HOST="${RELEASE_NAME}-keda-${NAMESPACE}.$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')"
 
-helm install llama3-2-3b helm/llama3.2-3b/ \
+helm install $RELEASE_NAME helm/llama3.2-3b/ \
   --set keda.enabled=true \
   --set httpAddon.enabled=true \
   --set httpAddon.host=$ROUTE_HOST \
@@ -100,10 +104,12 @@ oc get pods -n $NAMESPACE -w
 In another terminal, send a request:
 
 ```bash
-ROUTE_HOST=$(oc get route llama3-2-3b-keda -n $NAMESPACE -o jsonpath='{.spec.host}')
+# Get the route (uses the *-keda suffix)
+ROUTE_HOST=$(oc get route -n $NAMESPACE -l app.kubernetes.io/name=llama3-2-3b -o jsonpath='{.items[0].spec.host}')
 
-# This will take 60-90 seconds on first request (cold start)
-time curl -sk "https://$ROUTE_HOST/v1/models"
+# This will take 60-120 seconds on first request (cold start)
+# Use --max-time to wait for LLM to load
+time curl -sk --max-time 600 "https://$ROUTE_HOST/v1/models"
 ```
 
 You should see in the watch terminal:
