@@ -61,7 +61,7 @@ export NAMESPACE=llm
 oc new-project $NAMESPACE
 helm install llama3-2-3b helm/llama3.2-3b/ \
   --set keda.enabled=true \
-  --set inferenceService.maxReplicas=3 \
+  --set inferenceService.maxReplicas=2 \
   -n $NAMESPACE
 ```
 
@@ -72,7 +72,7 @@ export NAMESPACE=llm
 oc new-project $NAMESPACE
 helm install granite3-3-8b helm/granite3.3-8b/ \
   --set keda.enabled=true \
-  --set inferenceService.maxReplicas=3 \
+  --set inferenceService.maxReplicas=2 \
   -n $NAMESPACE
 ```
 
