@@ -29,16 +29,26 @@ httpAddon:
   # Scaling configuration
   minReplicas: 0
   maxReplicas: 3
-  scaledownPeriod: 300  # 5 minutes before scaling to zero
-  targetValue: 2        # Scale up at 2 req/s per replica
-  granularity: "1s"
-  window: "1m"
+  scaledownPeriod: 600  # 10 minutes before scaling to zero
+  concurrencyTargetValue: 1  # Scale up when 1 concurrent request per replica
   # KEDA namespace where HTTP Add-on is installed
   kedaNamespace: openshift-keda
   # Optional: Interceptor ClusterIP (auto-detected if empty)
   # Use this if helm template fails or for GitOps workflows
   # Get with: oc get svc keda-add-ons-http-interceptor-proxy -n openshift-keda -o jsonpath='{.spec.clusterIP}'
   interceptorIP: ""
+  # Cold start streaming callback (requires custom interceptor with callback support)
+  # Sends SSE keepalive events to streaming clients while the model loads from zero
+  coldStartCallback:
+    enabled: false
+    message: "Model is waking up, hold on..."
+    keepaliveMessage: "."
+    intervalSeconds: 5
+
+# Model configuration
+model:
+  maxModelLen: 100000
+  maxNumSeqs: 20
 
 nodeSelector:
   nvidia.com/gpu.present: "true"

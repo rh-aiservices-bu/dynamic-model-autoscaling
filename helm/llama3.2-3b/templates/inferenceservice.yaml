@@ -54,6 +54,9 @@ spec:
                 name: inference-prometheus-auth
     {{- end }}
     model:
+      args:
+        - '--max-num-seqs={{ .Values.model.maxNumSeqs | default 20 }}'
+        - '--max-model-len={{ .Values.model.maxModelLen | default 100000 }}'
       modelFormat:
         name: {{ .Values.inferenceService.modelFormat | default "vLLM" }}
       name: {{ .Values.inferenceService.modelName | default "" }}
