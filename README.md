@@ -163,7 +163,7 @@ sum(vllm:num_requests_running{model_name="llama3-2-3b"})
 oc get pods -n $NAMESPACE -w
 ```
 
-![Keda3](./assets/images/keda4.png)
+![Keda4](./assets/images/keda4.png)
 
 Scaled from 1 → 3 pods based on `vllm:num_requests_waiting` exceeding the threshold (default: 2).
 
