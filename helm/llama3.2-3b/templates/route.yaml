@@ -12,7 +12,7 @@ metadata:
     {{- if and .Values.keda.enabled .Values.httpAddon.enabled }}
     keda.sh/http-addon-enabled: "true"
     # HAProxy timeout for LLM cold starts (default 30s is too short)
-    haproxy.router.openshift.io/timeout: 180s
+    haproxy.router.openshift.io/timeout: 600s
     {{- end }}
 spec:
   {{- if and .Values.keda.enabled .Values.httpAddon.enabled .Values.httpAddon.host }}

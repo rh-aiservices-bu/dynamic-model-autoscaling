@@ -59,7 +59,7 @@ helm install uwm helm/uwm/ -n openshift-monitoring
 ### Step 3: Configure KEDA Controller
 
 ```bash
-helm install keda helm/keda/ -n openshift-keda
+oc apply -f helm/keda/templates/kedacontroller.yaml
 ```
 
 ### Step 4: Deploy Model (choose one)
@@ -209,7 +209,9 @@ helm repo add kedacore https://kedacore.github.io/charts
 helm repo update
 helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda \
   --set interceptor.replicas.waitTimeout=180s \
-  --set interceptor.responseHeaderTimeout=180s
+  --set interceptor.responseHeaderTimeout=180s \
+  --set podSecurityContext.fsGroup=null \
+  --set podSecurityContext.supplementalGroups=null
 
 # Deploy model with scale-to-zero
 RELEASE_NAME=llama3-2-3b
@@ -239,3 +241,21 @@ curl -sk https://$ROUTE_HOST/v1/models
 ```
 
 **Note**: First request after scale-to-zero takes 60-90 seconds while the model loads.
+
+### Cold Start Streaming Callback
+
+During cold starts, streaming clients (chat completions with `"stream": true`) wait silently for 60-90 seconds. A custom build of the HTTP Add-on interceptor can send SSE keepalive events during this wait, providing immediate feedback and preventing proxy timeouts.
+
+```bash
+# Deploy with callback enabled (requires custom interceptor — see full guide)
+helm install $RELEASE_NAME helm/llama3.2-3b/ \
+  --set keda.enabled=true \
+  --set httpAddon.enabled=true \
+  --set httpAddon.host=$ROUTE_HOST \
+  --set httpAddon.minReplicas=0 \
+  --set httpAddon.maxReplicas=1 \
+  --set httpAddon.coldStartCallback.enabled=true \
+  -n $NAMESPACE
+```
+
+> **Full setup guide**: [Demo: Cold Start Streaming Callback](assets/docs/demo-http-addon-callback.md)

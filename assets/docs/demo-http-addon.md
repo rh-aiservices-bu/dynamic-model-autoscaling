@@ -35,8 +35,12 @@ helm repo update
 # Install with extended timeouts for LLM cold starts
 helm install http-add-on kedacore/keda-add-ons-http -n openshift-keda \
   --set interceptor.replicas.waitTimeout=180s \
-  --set interceptor.responseHeaderTimeout=180s
+  --set interceptor.responseHeaderTimeout=180s \
+  --set podSecurityContext.fsGroup=null \
+  --set podSecurityContext.supplementalGroups=null
 ```
+
+> **Note**: The `podSecurityContext` overrides clear the upstream chart's default `fsGroup: 1000`, which OpenShift's `restricted-v2` SCC rejects. This lets OpenShift assign the namespace's allocated group automatically.
 
 Verify installation:
 
@@ -52,6 +56,8 @@ keda-add-ons-http-scaler-xxx               1/1     Running
 ```
 
 ## Step 2: Deploy Model with Scale-to-Zero
+
+> **Important**: Before deploying, review the chart's `values.yaml` and adapt values to your environment. In particular, `tolerations` must match your GPU node configuration (e.g., the default tolerates `nvidia.com/gpu=l40-gpu`, which will need to be changed for other GPU types).
 
 ```bash
 export NAMESPACE=autoscaling-keda-http-addon

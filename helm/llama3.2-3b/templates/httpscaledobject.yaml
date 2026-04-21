@@ -22,14 +22,18 @@ spec:
     kind: Deployment
     apiVersion: apps/v1
     service: {{ include "llama3-2-3b.fullname" . }}-predictor
-    port: 80
+    port: 8080
   replicas:
     min: {{ .Values.httpAddon.minReplicas | default 0 }}
     max: {{ .Values.httpAddon.maxReplicas | default (.Values.inferenceService.maxReplicas | default 3) }}
   scaledownPeriod: {{ .Values.httpAddon.scaledownPeriod | default 300 }}
   scalingMetric:
-    requestRate:
-      granularity: {{ .Values.httpAddon.granularity | default "1s" }}
-      targetValue: {{ .Values.httpAddon.targetValue | default 2 }}
-      window: {{ .Values.httpAddon.window | default "1m" }}
+    concurrency:
+      targetValue: {{ .Values.httpAddon.concurrencyTargetValue | default 1 }}
+  {{- if .Values.httpAddon.coldStartCallback.enabled }}
+  coldStartStreamingCallback:
+    message: {{ .Values.httpAddon.coldStartCallback.message | quote }}
+    keepaliveMessage: {{ .Values.httpAddon.coldStartCallback.keepaliveMessage | default "" | quote }}
+    intervalSeconds: {{ .Values.httpAddon.coldStartCallback.intervalSeconds | default 5 }}
+  {{- end }}
 {{- end }}
