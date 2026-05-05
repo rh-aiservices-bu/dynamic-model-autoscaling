@@ -98,9 +98,9 @@ get_metrics() {
         local running=$(grep "vllm:num_requests_running{" "$f" | grep -v "#" | awk '{print $2}')
         local waiting=$(grep "vllm:num_requests_waiting{" "$f" | grep -v "#" | awk '{print $2}')
         local success=$(grep "vllm:request_success_total{" "$f" | grep -v "#" | awk '{sum += $2} END {print sum}')
-        total_running=$(echo "$total_running + ${running:-0}" | bc)
-        total_waiting=$(echo "$total_waiting + ${waiting:-0}" | bc)
-        total_success=$(echo "$total_success + ${success:-0}" | bc)
+        total_running=$(awk "BEGIN {print $total_running + ${running:-0}}")
+        total_waiting=$(awk "BEGIN {print $total_waiting + ${waiting:-0}}")
+        total_success=$(awk "BEGIN {print $total_success + ${success:-0}}")
     done
 
     rm -rf "$tmp_dir"
@@ -161,16 +161,16 @@ print_metrics_row() {
     local running_color="${GREEN}"
     local waiting_color="${GREEN}"
 
-    if (( $(echo "$running > 10" | bc -l 2>/dev/null || echo "0") )); then
+    if (( $(awk "BEGIN {print ($running > 10) ? 1 : 0}") )); then
         running_color="${YELLOW}"
     fi
-    if (( $(echo "$running > 25" | bc -l 2>/dev/null || echo "0") )); then
+    if (( $(awk "BEGIN {print ($running > 25) ? 1 : 0}") )); then
         running_color="${RED}"
     fi
-    if (( $(echo "$waiting > 0" | bc -l 2>/dev/null || echo "0") )); then
+    if (( $(awk "BEGIN {print ($waiting > 0) ? 1 : 0}") )); then
         waiting_color="${YELLOW}"
     fi
-    if (( $(echo "$waiting > 5" | bc -l 2>/dev/null || echo "0") )); then
+    if (( $(awk "BEGIN {print ($waiting > 5) ? 1 : 0}") )); then
         waiting_color="${RED}"
     fi
 
